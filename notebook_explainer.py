@@ -37,14 +37,14 @@ Code to walk through:
 ```
 Just write the lecture—nothing else."""
 
-MARKDOWN_REWRITE_PROMPT = """You are a friendly writing coach who turns dense technical text into clear, engaging prose for beginners.
-Take the original markdown below and rewrite it in short, warm paragraphs. Use everyday words, break long sentences, and explain any jargon in the same sentence (e.g., "A DataFrame is just a smart table…").
-Keep every important fact, but add one extra sentence of helpful context when it would make the idea easier to grasp (e.g., why we need this step, what it prepares us for).
-No headings, no bullet lists unless they truly simplify. Use bold or italics only for emphasis. Stay under 250 words.
-Project context: {project_name}
+# UPDATED: Focused purely on rewriting, not explaining
+MARKDOWN_REWRITE_PROMPT = """Rewrite the markdown text below to be clearer, nicer, and easier to read. 
+Do not explain the concepts, do not define jargon, and do not add extra context. 
+Simply rephrase the existing sentences to be warm, smooth, and beginner-friendly. 
+Keep the meaning exactly the same, just improve the flow and tone.
 Original markdown:
 {markdown_content}
-Return only the rewritten paragraphs."""
+Return only the rewritten text."""
 
 EXPLANATION_PROMPT = CODE_EXPLANATION_PROMPT
 MARKDOWN_PROMPT = MARKDOWN_REWRITE_PROMPT
@@ -132,8 +132,8 @@ class NotebookExplainer:
 
     def simplify_markdown(self, markdown_content: str, project_name: str) -> Optional[str]:
         """Get simplified version from OpenAI API for markdown cells"""
+        # Note: project_name is passed but the new prompt ignores it
         prompt = MARKDOWN_PROMPT.format(
-            project_name=project_name,
             markdown_content=markdown_content
         )
         
@@ -204,9 +204,15 @@ class NotebookExplainer:
                         total_notebooks: Optional[int] = None) -> Tuple[bool, List[Dict]]:
         """Main processing function - returns (success, failures_list)"""
         
+        # SAFETY GUARD CLAUSE: Prevents processing of files that are already explained
+        input_path = Path(notebook_path)
+        if input_path.stem.lower().endswith('_explained'):
+            if show_detailed_progress:
+                print(f"\n⚠ Skipping: {input_path.name} (appears to be an output file)")
+            return True, []
+
         # Determine output path
         if output_path is None:
-            input_path = Path(notebook_path)
             output_path = input_path.parent / f"{input_path.stem}_explained{input_path.suffix}"
             output_path = str(output_path)
         
@@ -343,7 +349,7 @@ class BatchProcessor:
         notebooks = [
             nb for nb in notebooks 
             if '.ipynb_checkpoints' not in str(nb) 
-            and not nb.name.endswith('_explained.ipynb')
+            and not nb.name.lower().endswith('_explained.ipynb')
         ]
         
         return sorted(notebooks)
