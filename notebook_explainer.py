@@ -37,7 +37,6 @@ Code to walk through:
 ```
 Just write the lecture—nothing else."""
 
-# UPDATED: Focused purely on rewriting, not explaining
 MARKDOWN_REWRITE_PROMPT = """Rewrite the markdown text below to be clearer, nicer, and easier to read. 
 Do not explain the concepts, do not define jargon, and do not add extra context. 
 Simply rephrase the existing sentences to be warm, smooth, and beginner-friendly. 
@@ -79,6 +78,27 @@ class NotebookExplainer:
         except Exception as e:
             raise Exception(f"Error reading notebook: {e}")
 
+    def clean_empty_cells(self, notebook_data: dict) -> Tuple[dict, int]:
+        """
+        Removes any code or markdown cells that are completely empty or contain only whitespace.
+        Returns the cleaned notebook data and the count of removed cells.
+        """
+        original_cells = notebook_data.get('cells', [])
+        cleaned_cells = []
+        
+        for cell in original_cells:
+            # join list of strings into one string, then strip whitespace
+            source_content = "".join(cell.get('source', [])).strip()
+            
+            # Only keep the cell if it has content
+            if source_content:
+                cleaned_cells.append(cell)
+        
+        removed_count = len(original_cells) - len(cleaned_cells)
+        notebook_data['cells'] = cleaned_cells
+        
+        return notebook_data, removed_count
+
     def get_processable_cells(self, notebook_data: dict) -> list:
         """Extract all code and markdown cells from notebook"""
         cells = notebook_data.get('cells', [])
@@ -87,7 +107,7 @@ class NotebookExplainer:
             cell_type = cell.get('cell_type')
             if cell_type in ['code', 'markdown']:
                 content = ''.join(cell.get('source', []))
-                # Skip empty cells
+                # Double check emptiness, though clean_empty_cells handles the deletion
                 if content.strip():
                     processable_cells.append({
                         'index': i,
@@ -132,7 +152,6 @@ class NotebookExplainer:
 
     def simplify_markdown(self, markdown_content: str, project_name: str) -> Optional[str]:
         """Get simplified version from OpenAI API for markdown cells"""
-        # Note: project_name is passed but the new prompt ignores it
         prompt = MARKDOWN_PROMPT.format(
             markdown_content=markdown_content
         )
@@ -204,7 +223,7 @@ class NotebookExplainer:
                         total_notebooks: Optional[int] = None) -> Tuple[bool, List[Dict]]:
         """Main processing function - returns (success, failures_list)"""
         
-        # SAFETY GUARD CLAUSE: Prevents processing of files that are already explained
+        # SAFETY GUARD CLAUSE
         input_path = Path(notebook_path)
         if input_path.stem.lower().endswith('_explained'):
             if show_detailed_progress:
@@ -219,11 +238,16 @@ class NotebookExplainer:
         # Read notebook
         try:
             notebook_data = self.read_notebook(notebook_path)
+            
+            # === NEW: CLEAN EMPTY CELLS ===
+            # This modifies notebook_data in place before processing starts
+            notebook_data, removed_count = self.clean_empty_cells(notebook_data)
+            
         except Exception as e:
             print(f"✗ Failed to read notebook: {e}")
             return False, []
         
-        # Get processable cells
+        # Get processable cells (indices are now based on the cleaned list)
         processable_cells = self.get_processable_cells(notebook_data)
         if not processable_cells:
             print(f"⚠ No code or markdown cells found")
@@ -235,8 +259,13 @@ class NotebookExplainer:
                 print(f"\n[{notebook_number}/{total_notebooks}] 📓 {Path(notebook_path).name}")
             else:
                 print(f"\n📓 Processing: {Path(notebook_path).name}")
-            print(f"      Cells: {len([c for c in processable_cells if c['type'] == 'code'])} code, "
-                  f"{len([c for c in processable_cells if c['type'] == 'markdown'])} markdown")
+            
+            msg = f"      Cells: {len([c for c in processable_cells if c['type'] == 'code'])} code, " \
+                  f"{len([c for c in processable_cells if c['type'] == 'markdown'])} markdown"
+            
+            if removed_count > 0:
+                msg += f" (Removed {removed_count} empty cells)"
+            print(msg)
         
         # Process each cell
         stats = {
